@@ -3,16 +3,18 @@
 #include <QVector>
 #include <QString>
 #include <QPoint>
+#include <QRect>
 #include <cstdint>
 
 /**
  * PlotWidget
  * ----------
  * Two stacked plots (time + frequency) with:
- *   - FFT peak markers only (top-5, annotated)
+ *   - FFT single peak marker
  *   - Rubber-band drag-to-zoom (X and Y)
  *   - Double-click to reset zoom
  *   - Crosshair cursor with readout
+ *   - Maximize / restore each sub-plot (click the [+] button in title bar)
  */
 class PlotWidget : public QWidget
 {
@@ -41,14 +43,18 @@ private:
     struct PlotData {
         QVector<double> xs;
         QVector<double> ys;
-        double dataXMin = 0, dataXMax = 1;   // full data extent
+        double dataXMin = 0, dataXMax = 1;
         double dataYMin = -1, dataYMax = 1;
-        double viewXMin = 0, viewXMax = 1;   // current zoomed view
+        double viewXMin = 0, viewXMax = 1;
         double viewYMin = -1, viewYMax = 1;
         QString xLabel, yLabel, title;
         QColor  lineColor;
         QVector<Peak> peaks;
     };
+
+    // ── maximize state ────────────────────────────────────────────────────
+    enum ViewState { BothPlots, TimeOnly, FreqOnly };
+    ViewState m_viewState = BothPlots;
 
     // ── builders ──────────────────────────────────────────────────────────
     void buildTimePlot(const QVector<qint16> &s, double rateHz);
@@ -64,11 +70,18 @@ private:
     void drawPeaks(QPainter &p, const QRect &plot, const PlotData &d) const;
     void drawCrosshair(QPainter &p, const QRect &plot, const PlotData &d) const;
     void drawRubberBand(QPainter &p, const QRect &plot, const PlotData &d) const;
+    void drawMaxButton(QPainter &p, const QRect &widgetRect, bool isMaximized) const;
 
     // ── coordinate helpers ────────────────────────────────────────────────
     QRect plotRect(const QRect &widgetRect) const;
+    QRect timeWidgetRect() const;
+    QRect freqWidgetRect() const;
+    QRect maxBtnRect(const QRect &widgetRect) const;   // [+]/[-] button hit area
+
     bool  hitTimePlot(const QPoint &pos) const;
     bool  hitFreqPlot(const QPoint &pos) const;
+    bool  hitTimeMaxBtn(const QPoint &pos) const;
+    bool  hitFreqMaxBtn(const QPoint &pos) const;
 
     // ── state ─────────────────────────────────────────────────────────────
     QString  m_label;
@@ -85,8 +98,9 @@ private:
     QPoint m_mousePos;
     bool   m_mouseInWidget = false;
 
-    // layout
-    static constexpr int PAD_L = 56, PAD_R = 12, PAD_T = 28, PAD_B = 38;
+    // layout constants
+    static constexpr int PAD_L  = 56, PAD_R = 12, PAD_T = 28, PAD_B = 38;
+    static constexpr int BTN_SZ = 20;   // maximize button size
 
     // colours
     static constexpr QRgb COL_BG     = 0xFF1E1E2E;
@@ -98,4 +112,6 @@ private:
     static constexpr QRgb COL_FREQ   = 0xFFA6E3A1;
     static constexpr QRgb COL_PEAK   = 0xFFFF5555;
     static constexpr QRgb COL_CROSS  = 0x66FFFFFF;
+    static constexpr QRgb COL_BTN    = 0xFF45475A;
+    static constexpr QRgb COL_BTNHOV = 0xFF6C7086;
 };

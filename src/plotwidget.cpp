@@ -161,7 +161,7 @@ void PlotWidget::findPeaks(PlotData &d)
 
     const int    MIN_DIST  = 5;
     const double MIN_PROM  = 6.0;   // dB
-    const int    MAX_PEAKS = 5;
+    const int    MAX_PEAKS = 1;
 
     struct Candidate { int idx; double val; };
     QVector<Candidate> cands;

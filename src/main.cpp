@@ -10,9 +10,7 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
     app.setStyle("Fusion");
-    app.setApplicationName("Avnet RFSoC Evaluation Tool");
-    app.setOrganizationName("Avnet");
-
+    app.setApplicationName("RFSoC Evaluation Tool");
     MainWindow win;
     win.show();
     return app.exec();

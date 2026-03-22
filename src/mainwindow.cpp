@@ -80,7 +80,7 @@ static QStringList channelNames(const QString &prefix)
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle("Avnet RFSoC Evaluation Tool");
+    setWindowTitle("RFSoC Evaluation Tool");
     resize(1600, 950);
     setStyleSheet("QMainWindow,QWidget{background:#1e1e2e;color:#cdd6f4;}"
                   "QStatusBar{background:#181825;}");

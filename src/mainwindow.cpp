@@ -4,6 +4,7 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFrame>
+#include <QScrollArea>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QCloseEvent>
@@ -87,14 +88,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_dacP.resize(Constant::NUM_CHANNELS);
     m_adcP.resize(Constant::NUM_CHANNELS);
-    for (auto &p : m_dacP) {
-        p.sampleRate = Constant::DAC_FS;
-        p.sampleNum  = Constant::DAC_SAMPLE_NUM;
-    }
-    for (auto &p : m_adcP) {
-        p.sampleRate = Constant::ADC_FS;
-        p.sampleNum  = Constant::ADC_SAMPLE_NUM;
-    }
+    for (auto &p : m_dacP) { p.sampleRate = Constant::DAC_FS;  p.sampleNum = Constant::DAC_SAMPLE_NUM; }
+    for (auto &p : m_adcP) { p.sampleRate = Constant::ADC_FS;  p.sampleNum = Constant::ADC_SAMPLE_NUM; }
 
     connectWorkers(QString(Constant::BOARD_IP));
 
@@ -105,11 +100,10 @@ MainWindow::MainWindow(QWidget *parent)
     root->setSpacing(6);
     root->addWidget(buildMenuPanel());
 
-    // DAC column: PlotWidget on top, WaterfallWidget below
+    // DAC column
     auto *dacCol = new QWidget(central);
     auto *dacColLay = new QVBoxLayout(dacCol);
-    dacColLay->setContentsMargins(0,0,0,0);
-    dacColLay->setSpacing(4);
+    dacColLay->setContentsMargins(0,0,0,0); dacColLay->setSpacing(4);
     m_dacPlot = new PlotWidget("DAC", dacCol);
     m_dacWaterfall = new WaterfallWidget("DAC", dacCol);
     m_dacWaterfall->setVisible(false);
@@ -120,8 +114,7 @@ MainWindow::MainWindow(QWidget *parent)
     // ADC column
     auto *adcCol = new QWidget(central);
     auto *adcColLay = new QVBoxLayout(adcCol);
-    adcColLay->setContentsMargins(0,0,0,0);
-    adcColLay->setSpacing(4);
+    adcColLay->setContentsMargins(0,0,0,0); adcColLay->setSpacing(4);
     m_adcPlot = new PlotWidget("ADC", adcCol);
     m_adcWaterfall = new WaterfallWidget("ADC", adcCol);
     m_adcWaterfall->setVisible(false);
@@ -129,16 +122,15 @@ MainWindow::MainWindow(QWidget *parent)
     adcColLay->addWidget(m_adcWaterfall, 1);
     root->addWidget(adcCol, 1);
 
-    // Waterfall maximize: when maximized hide plot, expand waterfall
     connect(m_dacWaterfall, &WaterfallWidget::maximizeToggled, this, [this, dacColLay](bool max){
         m_dacPlot->setVisible(!max);
         dacColLay->setStretch(0, max ? 0 : 3);
-        dacColLay->setStretch(1, max ? 1 : 1);
+        dacColLay->setStretch(1, 1);
     });
     connect(m_adcWaterfall, &WaterfallWidget::maximizeToggled, this, [this, adcColLay](bool max){
         m_adcPlot->setVisible(!max);
         adcColLay->setStretch(0, max ? 0 : 3);
-        adcColLay->setStretch(1, max ? 1 : 1);
+        adcColLay->setStretch(1, 1);
     });
 
     m_statusLbl = new QLabel("Ready");
@@ -161,79 +153,77 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    m_cmdW->stop();
-    m_dataW->stop();
-    m_cmdW->wait(2000);
-    m_dataW->wait(2000);
+    m_cmdW->stop();  m_dataW->stop();
+    m_cmdW->wait(2000); m_dataW->wait(2000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// connectWorkers — create/recreate workers and wire all signals
+// connectWorkers
 // ─────────────────────────────────────────────────────────────────────────────
 
 void MainWindow::connectWorkers(const QString &ip)
 {
-    // Stop and destroy existing workers cleanly
-    if (m_cmdW) {
-        m_cmdW->stop();
-        m_cmdW->wait(3000);
-        delete m_cmdW;
-        m_cmdW = nullptr;
-    }
-    if (m_dataW) {
-        m_dataW->stop();
-        m_dataW->wait(3000);
-        delete m_dataW;
-        m_dataW = nullptr;
-    }
+    if (m_cmdW)  { m_cmdW->stop();  m_cmdW->wait(3000);  delete m_cmdW;  m_cmdW  = nullptr; }
+    if (m_dataW) { m_dataW->stop(); m_dataW->wait(3000); delete m_dataW; m_dataW = nullptr; }
 
-    // Reset pending flags so stale sequenceDone/sendDone can't fire
     m_pendingAcquire  = false;
     m_pendingGenerate = false;
 
     m_cmdW  = new CmdWorker (ip, Constant::CMD_PORT,  this);
     m_dataW = new DataWorker(ip, Constant::DATA_PORT, this);
 
-    // Data signals
-    connect(m_dataW, &DataWorker::captureReady,
-            this,    &MainWindow::onCaptureReady);
-    connect(m_dataW, &DataWorker::sendDone,
-            this,    &MainWindow::onGenerateDone);
+    connect(m_dataW, &DataWorker::captureReady, this, &MainWindow::onCaptureReady);
+    connect(m_dataW, &DataWorker::sendDone,     this, &MainWindow::onGenerateDone);
     connect(m_dataW, &DataWorker::errorOccurred,
-            this, [this](const QString &e){
-                setStatus("DATA ERROR: " + e);
-                unlockUi();
-            });
-
-    // CMD signals
-    connect(m_cmdW, &CmdWorker::sequenceDone,
-            this,   &MainWindow::onCmdSequenceDone);
+            this, [this](const QString &e){ setStatus("DATA ERROR: " + e); unlockUi(); });
+    connect(m_cmdW, &CmdWorker::sequenceDone,   this, &MainWindow::onCmdSequenceDone);
     connect(m_cmdW, &CmdWorker::connected,
-            this, [this, ip](){
-                setStatus("Connected to " + ip);
-            });
+            this, [this, ip](){ setStatus("Connected to " + ip); });
     connect(m_cmdW, &CmdWorker::errorOccurred,
-            this, [this](const QString &e){
-                setStatus("CMD ERROR: " + e);
-            });
+            this, [this](const QString &e){ setStatus("CMD ERROR: " + e); });
 
     m_cmdW->start();
     m_dataW->start();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Menu panel
+// Menu panel  (scrollable)
 // ─────────────────────────────────────────────────────────────────────────────
 
 QWidget *MainWindow::buildMenuPanel()
 {
+    // Outer fixed-width container
+    auto *outer = new QWidget;
+    outer->setFixedWidth(270);
+    outer->setStyleSheet("QWidget{background:#181825;}");
+    auto *outerLay = new QVBoxLayout(outer);
+    outerLay->setContentsMargins(0, 0, 0, 0);
+    outerLay->setSpacing(0);
+
+    // Scroll area
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setStyleSheet(
+        "QScrollArea{background:#181825;border:none;}"
+        "QScrollBar:vertical{background:#181825;width:6px;border-radius:3px;margin:0;}"
+        "QScrollBar::handle:vertical{background:#45475a;border-radius:3px;min-height:20px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+        "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:none;}");
+    outerLay->addWidget(scroll);
+
+    // Inner content widget
     auto *panel = new QWidget;
-    panel->setFixedWidth(265);
     panel->setStyleSheet("QWidget{background:#181825;}");
+    scroll->setWidget(panel);
+
     auto *lay = new QVBoxLayout(panel);
     lay->setContentsMargins(8, 8, 8, 8);
     lay->setSpacing(5);
 
+    // Title
     auto *title = new QLabel("RFSoC Tool");
     title->setStyleSheet("color:#89b4fa;font-size:16px;font-weight:bold;");
     title->setAlignment(Qt::AlignHCenter);
@@ -254,10 +244,7 @@ QWidget *MainWindow::buildMenuPanel()
         auto *btnConnect = new QPushButton("Reconnect"); styleGreen(btnConnect);
         connect(btnConnect, &QPushButton::clicked, this, [this](){
             QString ip = m_ipEdit->text().trimmed();
-            if (ip.isEmpty()) {
-                setStatus("Error: IP address is empty");
-                return;
-            }
+            if (ip.isEmpty()) { setStatus("Error: IP address is empty"); return; }
             setStatus("Reconnecting to " + ip + " …");
             lockUi();
             connectWorkers(ip);
@@ -267,7 +254,7 @@ QWidget *MainWindow::buildMenuPanel()
     }
     lay->addWidget(makeSep());
 
-    // DAC
+    // ── DAC ───────────────────────────────────────────────────────────────
     {
         auto *hdr = new QLabel("── DAC ──");
         hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
@@ -291,8 +278,7 @@ QWidget *MainWindow::buildMenuPanel()
         lay->addWidget(m_dacNumEdit);
 
         lay->addWidget(makeLabel("Rate (GSPS)"));
-        m_dacRateEdit = makeField(
-            QString::number(m_dacP[0].sampleRate / 1e9, 'f', 4), true);
+        m_dacRateEdit = makeField(QString::number(m_dacP[0].sampleRate / 1e9, 'f', 4), true);
         lay->addWidget(m_dacRateEdit);
 
         lay->addWidget(makeLabel("Waveform Shape"));
@@ -300,9 +286,7 @@ QWidget *MainWindow::buildMenuPanel()
         m_comboWaveShape->addItems({"Sine", "Square"});
         m_comboWaveShape->setStyleSheet(COMBO_STYLE);
         connect(m_comboWaveShape, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [this](int idx){
-                    m_dacDutyEdit->setEnabled(idx == 1);  // enable only for square
-                });
+                this, [this](int idx){ m_dacDutyEdit->setEnabled(idx == 1); });
         lay->addWidget(m_comboWaveShape);
 
         lay->addWidget(makeLabel("Duty Cycle (square only)"));
@@ -319,10 +303,9 @@ QWidget *MainWindow::buildMenuPanel()
         row->addWidget(m_btnLoad);
         lay->addLayout(row);
     }
-
     lay->addWidget(makeSep());
 
-    // ADC
+    // ── ADC ───────────────────────────────────────────────────────────────
     {
         auto *hdr = new QLabel("── ADC ──");
         hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
@@ -342,8 +325,7 @@ QWidget *MainWindow::buildMenuPanel()
         lay->addWidget(m_adcNumEdit);
 
         lay->addWidget(makeLabel("Rate (GSPS)"));
-        m_adcRateEdit = makeField(
-            QString::number(m_adcP[0].sampleRate / 1e9, 'f', 4), true);
+        m_adcRateEdit = makeField(QString::number(m_adcP[0].sampleRate / 1e9, 'f', 4), true);
         lay->addWidget(m_adcRateEdit);
 
         auto *row = new QHBoxLayout;
@@ -360,39 +342,38 @@ QWidget *MainWindow::buildMenuPanel()
         connect(m_chkAuto, &QCheckBox::toggled,
                 this, [this](bool v){ m_autoAcquire = v; });
         lay->addWidget(m_chkAuto);
+    }
+    lay->addWidget(makeSep());
 
-        // Waterfall toggle
-        lay->addWidget(makeSep());
-        auto *wfHdr = new QLabel("── Waterfall ──");
-        wfHdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
-        wfHdr->setAlignment(Qt::AlignHCenter);
-        lay->addWidget(wfHdr);
+    // ── Waterfall ─────────────────────────────────────────────────────────
+    {
+        auto *hdr = new QLabel("── Waterfall ──");
+        hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
+        hdr->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(hdr);
 
-        auto *chkWaterfall = new QCheckBox("Enable Waterfall");
-        chkWaterfall->setStyleSheet("QCheckBox{color:#cdd6f4;}");
-        connect(chkWaterfall, &QCheckBox::toggled, this, [this](bool v){
+        auto *chkWf = new QCheckBox("Enable Waterfall");
+        chkWf->setStyleSheet("QCheckBox{color:#cdd6f4;}");
+        connect(chkWf, &QCheckBox::toggled, this, [this](bool v){
             m_waterfallEnabled = v;
             m_dacWaterfall->setVisible(v);
             m_adcWaterfall->setVisible(v);
-            if (!v) {
-                m_dacWaterfall->clearHistory();
-                m_adcWaterfall->clearHistory();
-            }
+            if (!v) { m_dacWaterfall->clearHistory(); m_adcWaterfall->clearHistory(); }
         });
-        lay->addWidget(chkWaterfall);
+        lay->addWidget(chkWf);
 
         lay->addWidget(makeLabel("dBFS min"));
-        auto *wfMinEdit = makeField("-120");
-        lay->addWidget(wfMinEdit);
+        auto *wfMin = makeField("-120");
+        lay->addWidget(wfMin);
         lay->addWidget(makeLabel("dBFS max"));
-        auto *wfMaxEdit = makeField("0");
-        lay->addWidget(wfMaxEdit);
+        auto *wfMax = makeField("0");
+        lay->addWidget(wfMax);
 
         auto *btnWfRange = new QPushButton("Set Range"); styleGreen(btnWfRange);
-        connect(btnWfRange, &QPushButton::clicked, this, [this, wfMinEdit, wfMaxEdit](){
+        connect(btnWfRange, &QPushButton::clicked, this, [this, wfMin, wfMax](){
             bool ok1, ok2;
-            double mn = wfMinEdit->text().toDouble(&ok1);
-            double mx = wfMaxEdit->text().toDouble(&ok2);
+            double mn = wfMin->text().toDouble(&ok1);
+            double mx = wfMax->text().toDouble(&ok2);
             if (ok1 && ok2 && mn < mx) {
                 m_dacWaterfall->setDbRange(mn, mx);
                 m_adcWaterfall->setDbRange(mn, mx);
@@ -406,16 +387,96 @@ QWidget *MainWindow::buildMenuPanel()
             m_adcWaterfall->clearHistory();
         });
         lay->addWidget(btnWfClear);
-
     }
-
     lay->addWidget(makeSep());
 
+    // ── Persistence ───────────────────────────────────────────────────────
+    {
+        auto *hdr = new QLabel("── Persistence ──");
+        hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
+        hdr->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(hdr);
+
+        auto *chkP = new QCheckBox("Enable Persistence");
+        chkP->setStyleSheet("QCheckBox{color:#cdd6f4;}");
+        connect(chkP, &QCheckBox::toggled, this, [this](bool v){
+            m_dacPlot->setPersistenceEnabled(v);
+            m_adcPlot->setPersistenceEnabled(v);
+        });
+        lay->addWidget(chkP);
+
+        auto *btnClearP = new QPushButton("Clear"); styleGreen(btnClearP);
+        connect(btnClearP, &QPushButton::clicked, this, [this](){
+            m_dacPlot->clearPersistence();
+            m_adcPlot->clearPersistence();
+        });
+        lay->addWidget(btnClearP);
+    }
+    lay->addWidget(makeSep());
+
+    // ── Phase Noise ───────────────────────────────────────────────────────
+    {
+        auto *hdr = new QLabel("── Phase Noise ──");
+        hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
+        hdr->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(hdr);
+
+        auto *chkPN = new QCheckBox("Enable Phase Noise");
+        chkPN->setStyleSheet("QCheckBox{color:#cdd6f4;}");
+        connect(chkPN, &QCheckBox::toggled, this, [this](bool v){
+            m_dacPlot->setPhaseNoiseEnabled(v);
+            m_adcPlot->setPhaseNoiseEnabled(v);
+        });
+        lay->addWidget(chkPN);
+    }
+    lay->addWidget(makeSep());
+
+    // ── Export ────────────────────────────────────────────────────────────
+    {
+        auto *hdr = new QLabel("── Export ──");
+        hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
+        hdr->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(hdr);
+
+        auto *rowE = new QHBoxLayout;
+        auto *btnPng = new QPushButton("PNG"); styleGreen(btnPng);
+        auto *btnCsv = new QPushButton("CSV"); styleGreen(btnCsv);
+
+        connect(btnPng, &QPushButton::clicked, this, [this](){
+            QString fname = QFileDialog::getSaveFileName(
+                this, "Export PNG", "rfsoc_plot.png", "PNG Image (*.png)");
+            if (fname.isEmpty()) return;
+            QString df = fname; df.replace(".png", "_dac.png");
+            QString af = fname; af.replace(".png", "_adc.png");
+            m_dacPlot->exportPng(df);
+            m_adcPlot->exportPng(af);
+            setStatus("PNG saved: " + df + ", " + af);
+        });
+
+        connect(btnCsv, &QPushButton::clicked, this, [this](){
+            QString fname = QFileDialog::getSaveFileName(
+                this, "Export CSV", "rfsoc_data.csv", "CSV File (*.csv)");
+            if (fname.isEmpty()) return;
+            QString df = fname; df.replace(".csv", "_dac.csv");
+            QString af = fname; af.replace(".csv", "_adc.csv");
+            m_dacPlot->exportCsv(df);
+            m_adcPlot->exportCsv(af);
+            setStatus("CSV saved: " + df + ", " + af);
+        });
+
+        rowE->addWidget(btnPng);
+        rowE->addWidget(btnCsv);
+        lay->addLayout(rowE);
+    }
+    lay->addWidget(makeSep());
+
+    // ── Exit ──────────────────────────────────────────────────────────────
     auto *btnExit = new QPushButton("Exit"); styleRed(btnExit);
     connect(btnExit, &QPushButton::clicked, this, &MainWindow::onExit);
     lay->addWidget(btnExit);
     lay->addStretch();
-    return panel;
+
+    return outer;   // return the scroll container, not the inner panel
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -445,9 +506,10 @@ void MainWindow::onGenerate()
 
     int trimmed = 0;
     bool isSquare = (m_comboWaveShape->currentIndex() == 1);
+    double duty = 0.5;
     if (isSquare) {
         bool dcOk = false;
-        double duty = m_dacDutyEdit->text().toDouble(&dcOk);
+        duty = m_dacDutyEdit->text().toDouble(&dcOk);
         if (!dcOk || duty <= 0.0 || duty >= 1.0) duty = 0.5;
         m_dacData = WaveformGenerator::generateSquareNormalized(
             p.freq, p.theta, p.sampleRate, p.sampleNum, trimmed, duty);
@@ -456,13 +518,14 @@ void MainWindow::onGenerate()
             p.freq, p.theta, p.sampleRate, p.sampleNum, trimmed);
     }
     p.sampleNumTrimmed = trimmed;
+    m_dacPlot->setSquareMode(isSquare, duty);
+    m_adcPlot->setSquareMode(isSquare, duty);
     m_dacPlot->updateWaveform(m_dacData, p.sampleRate);
 
-    // Save TX request — fired in onCmdSequenceDone after CMD sequence finishes
     const int ch = m_dacCh;
     m_pendingDataReq.type    = DataRequest::SendWaveform;
     m_pendingDataReq.command = QString("WriteDataToMemoryFromSocket 3 %1 %2 %3 0\r\n")
-                                   .arg(ch / 4).arg(ch % 4).arg(p.sampleNum * 2).toUtf8();
+                                   .arg(ch/4).arg(ch%4).arg(p.sampleNum * 2).toUtf8();
     m_pendingDataReq.payload = QByteArray(
         reinterpret_cast<const char *>(m_dacData.constData()),
         m_dacData.size() * static_cast<int>(sizeof(qint16)));
@@ -470,15 +533,12 @@ void MainWindow::onGenerate()
 
     lockUi();
 
-    // CMD sequence with 100 ms delay between each command (same as Python sleep(0.1))
     QList<CmdItem> seq;
-    seq << CmdItem{ "TermMode 0\r\n",                                              100, false }
-        << CmdItem{ "LocalMemInfo 1\r\n",                                          100, false }
-        << CmdItem{ "LocalMemTrigger 1 0 0 0x0\r\n",                              100, false }
+    seq << CmdItem{ "TermMode 0\r\n",                                          100, false }
+        << CmdItem{ "LocalMemInfo 1\r\n",                                      100, false }
+        << CmdItem{ "LocalMemTrigger 1 0 0 0x0\r\n",                          100, false }
         << CmdItem{ QString("SetLocalMemSample 1 %1 %2 %3\r\n")
-                        .arg(ch/4).arg(ch%4).arg(p.sampleNumTrimmed).toUtf8(),     100, true  };
-    //                                                                                   ^^^^
-    //                                                         finalItem=true → emits sequenceDone
+                        .arg(ch/4).arg(ch%4).arg(p.sampleNumTrimmed).toUtf8(), 100, true  };
     m_cmdW->enqueueSequence(seq);
     setStatus(QString("Preparing DAC ch%1 …").arg(ch));
 }
@@ -486,8 +546,7 @@ void MainWindow::onGenerate()
 void MainWindow::onLoadDac()
 {
     const QString fname = QFileDialog::getOpenFileName(
-        this, "Load DAC binary", {},
-        "Binary files (*.bin);;All files (*.*)");
+        this, "Load DAC binary", {}, "Binary files (*.bin);;All files (*.*)");
     if (fname.isEmpty()) return;
 
     QFile f(fname);
@@ -528,16 +587,14 @@ void MainWindow::enqueueAcquireSequence()
     const int ch = m_adcCh;
     const AdcParams &p = m_adcP[ch];
 
-    // Save RX request — fired in onCmdSequenceDone after CMD sequence finishes
     m_pendingDataReq.type          = DataRequest::ReceiveCapture;
     m_pendingDataReq.command       = QString("ReadDataFromMemoryToSocket 3 %1 %2 %3 0\r\n")
-                                         .arg(ch / 4).arg(ch % 4).arg(p.sampleNum * 2).toUtf8();
+                                         .arg(ch/4).arg(ch%4).arg(p.sampleNum * 2).toUtf8();
     m_pendingDataReq.expectedBytes = p.sampleNum * 2;
     m_pendingDataReq.sampleRate    = p.sampleRate;
     m_pendingDataReq.channel       = ch;
     m_pendingAcquire = true;
 
-    // CMD sequence with 100 ms delay between each command
     QList<CmdItem> seq;
     seq << CmdItem{ "TermMode 0\r\n",                                              150, false }
         << CmdItem{ QString("SetLocalMemSample 0 %1 %2 %3\r\n")
@@ -614,10 +671,8 @@ void MainWindow::onSaveAdc()
 void MainWindow::onExit()
 {
     sendCmd("disconnect\r\n");
-    m_cmdW->stop();
-    m_dataW->stop();
-    m_cmdW->wait(2000);
-    m_dataW->wait(2000);
+    m_cmdW->stop();  m_dataW->stop();
+    m_cmdW->wait(2000); m_dataW->wait(2000);
     QApplication::quit();
 }
 
@@ -634,18 +689,14 @@ void MainWindow::sendCmd(const QString &cmd)
 
 void MainWindow::lockUi()
 {
-    m_btnGen->setEnabled(false);
-    m_btnLoad->setEnabled(false);
-    m_btnAcq->setEnabled(false);
-    m_btnSave->setEnabled(false);
+    m_btnGen->setEnabled(false);  m_btnLoad->setEnabled(false);
+    m_btnAcq->setEnabled(false);  m_btnSave->setEnabled(false);
 }
 
 void MainWindow::unlockUi()
 {
-    m_btnGen->setEnabled(true);
-    m_btnLoad->setEnabled(true);
-    m_btnAcq->setEnabled(true);
-    m_btnSave->setEnabled(true);
+    m_btnGen->setEnabled(true);   m_btnLoad->setEnabled(true);
+    m_btnAcq->setEnabled(true);   m_btnSave->setEnabled(true);
 }
 
 void MainWindow::setStatus(const QString &s)

@@ -9,13 +9,15 @@
 /**
  * PlotWidget
  * ----------
- * Two stacked plots (time + frequency) with:
- *   - FFT single peak marker
- *   - Rubber-band drag-to-zoom (X and Y)
- *   - Double-click to reset zoom
- *   - Crosshair cursor with readout
- *   - Maximize / restore each sub-plot
- *   - RF metrics panel: SNR, SFDR, Harmonics, ENOB
+ * Time + Frequency + Phase Noise plots with:
+ *   - RF metrics panel (SNR, SFDR, THD, ENOB / square rolloff)
+ *   - Harmonic markers
+ *   - Persistence / overlay mode (last N FFT captures)
+ *   - Phase noise plot (dBc/Hz vs offset)
+ *   - Rubber-band zoom, double-click reset
+ *   - Crosshair readout
+ *   - Export PNG / CSV
+ *   - Maximize / restore per sub-plot
  */
 class PlotWidget : public QWidget
 {
@@ -24,7 +26,20 @@ public:
     explicit PlotWidget(const QString &label, QWidget *parent = nullptr);
 
     void updateWaveform(const QVector<qint16> &samples, double sampleRateHz);
-    // Returns the most recent FFT dBFS spectrum for waterfall feeding
+    void setSquareMode(bool square, double dutyCycle = 0.5);
+
+    // Persistence
+    void setPersistenceEnabled(bool on);
+    void setPersistenceDepth(int n);   // number of traces to keep
+    void clearPersistence();
+
+    // Phase noise
+    void setPhaseNoiseEnabled(bool on);
+
+    // Export
+    void exportPng(const QString &filePath);
+    void exportCsv(const QString &filePath);
+
     QVector<double> lastFreqSpectrum() const { return m_freq.ys; }
 
 protected:
@@ -38,47 +53,36 @@ protected:
 private:
     // ── RF metrics ────────────────────────────────────────────────────────
     struct RfMetrics {
-        double snr      = 0;   // dB
-        double sfdr     = 0;   // dBc
-        double thd      = 0;   // dBc  (total harmonic distortion)
-        double enob     = 0;   // bits
-        double fundFreq = 0;   // MHz
-        double fundPow  = 0;   // dBFS
-        QVector<double> harmonicFreqs; // MHz
-        QVector<double> harmonicPows;  // dBFS
-        bool valid = false;
+        double snr = 0, sfdr = 0, thd = 0, enob = 0;
+        double fundFreq = 0, fundPow = 0, bandwidth = 0;
+        QVector<double> harmonicFreqs, harmonicPows, idealHarmonicPows;
+        bool isSquare = false, valid = false;
     };
 
     // ── plot data ─────────────────────────────────────────────────────────
-    struct Peak {
-        double  x;
-        double  y;
-        QString label;
-    };
+    struct Peak { double x, y; QString label; };
 
     struct PlotData {
-        QVector<double> xs;
-        QVector<double> ys;
-        double dataXMin = 0, dataXMax = 1;
-        double dataYMin = -1, dataYMax = 1;
-        double viewXMin = 0, viewXMax = 1;
-        double viewYMin = -1, viewYMax = 1;
+        QVector<double> xs, ys;
+        double dataXMin=0, dataXMax=1, dataYMin=-1, dataYMax=1;
+        double viewXMin=0, viewXMax=1, viewYMin=-1, viewYMax=1;
         QString xLabel, yLabel, title;
         QColor  lineColor;
         QVector<Peak> peaks;
     };
 
-    // ── maximize state ────────────────────────────────────────────────────
-    enum ViewState { BothPlots, TimeOnly, FreqOnly };
+    // ── view state ────────────────────────────────────────────────────────
+    enum ViewState { BothPlots, TimeOnly, FreqOnly, PhaseNoiseOnly };
     ViewState m_viewState = BothPlots;
 
     // ── builders ──────────────────────────────────────────────────────────
     void buildTimePlot(const QVector<qint16> &s, double rateHz);
     void buildFreqPlot(const QVector<qint16> &s, double rateHz);
+    void buildPhaseNoise(const QVector<double> &db,
+                         const QVector<double> &freqsMHz, double rateHz);
     void findPeaks(PlotData &d);
     void computeMetrics(const QVector<double> &db,
-                        const QVector<double> &freqsMHz,
-                        double sampleRateHz);
+                        const QVector<double> &freqsMHz, double sampleRateHz);
 
     static QVector<double> hammingFFT_dBFS(
         const QVector<qint16> &s, double rateHz,
@@ -86,6 +90,8 @@ private:
 
     // ── drawing ───────────────────────────────────────────────────────────
     void drawPlot(QPainter &p, const QRect &wr, PlotData &d) const;
+    void drawPersistence(QPainter &p, const QRect &plot) const;
+    void drawPhaseNoisePlot(QPainter &p, const QRect &wr) const;
     void drawMetricsPanel(QPainter &p, const QRect &wr) const;
     void drawHarmonicMarkers(QPainter &p, const QRect &plot) const;
     void drawPeaks(QPainter &p, const QRect &plot, const PlotData &d) const;
@@ -94,23 +100,37 @@ private:
     void drawMaxButton(QPainter &p, const QRect &wr, bool isMaximized) const;
 
     // ── layout ────────────────────────────────────────────────────────────
-    QRect timeWidgetRect() const;
-    QRect freqWidgetRect() const;
+    QRect timeWidgetRect()       const;
+    QRect freqWidgetRect()       const;
+    QRect phaseNoiseWidgetRect() const;
     QRect plotRect(const QRect &wr) const;
     QRect maxBtnRect(const QRect &wr) const;
-    // metrics panel lives inside the freq widget rect, right side
     QRect metricsPanelRect(const QRect &freqWr) const;
 
-    bool hitTimePlot(const QPoint &pos) const;
-    bool hitFreqPlot(const QPoint &pos) const;
-    bool hitTimeMaxBtn(const QPoint &pos) const;
-    bool hitFreqMaxBtn(const QPoint &pos) const;
+    bool hitTimePlot(const QPoint &p)      const;
+    bool hitFreqPlot(const QPoint &p)      const;
+    bool hitPNPlot(const QPoint &p)        const;
+    bool hitTimeMaxBtn(const QPoint &p)    const;
+    bool hitFreqMaxBtn(const QPoint &p)    const;
+    bool hitPNMaxBtn(const QPoint &p)      const;
 
     // ── state ─────────────────────────────────────────────────────────────
     QString   m_label;
-    PlotData  m_time;
-    PlotData  m_freq;
+    PlotData  m_time, m_freq;
     RfMetrics m_metrics;
+
+    // waveform type
+    bool   m_isSquare  = false;
+    double m_dutyCycle = 0.5;
+
+    // persistence
+    bool   m_persistEnabled = false;
+    int    m_persistDepth   = 20;
+    QVector<QVector<double>> m_persistTraces;  // last N freq spectra (ys only)
+
+    // phase noise
+    bool            m_phaseNoiseEnabled = false;
+    PlotData        m_pn;    // x=offset MHz, y=dBc/Hz
 
     // rubber-band
     bool   m_selecting    = false;
@@ -121,9 +141,9 @@ private:
     QPoint m_mousePos;
     bool   m_mouseInWidget = false;
 
-    static constexpr int PAD_L   = 56, PAD_R = 12, PAD_T = 28, PAD_B = 38;
-    static constexpr int BTN_SZ  = 20;
-    static constexpr int MET_W   = 175;  // metrics panel width (pixels)
+    static constexpr int PAD_L  = 56, PAD_R = 12, PAD_T = 28, PAD_B = 38;
+    static constexpr int BTN_SZ = 20;
+    static constexpr int MET_W  = 210;
 
     static constexpr QRgb COL_BG      = 0xFF1E1E2E;
     static constexpr QRgb COL_PLOTBG  = 0xFF181825;
@@ -136,6 +156,8 @@ private:
     static constexpr QRgb COL_CROSS   = 0x66FFFFFF;
     static constexpr QRgb COL_BTN     = 0xFF45475A;
     static constexpr QRgb COL_BTNHOV  = 0xFF6C7086;
-    static constexpr QRgb COL_HARM    = 0xFFFFB86C;  // harmonic marker colour
-    static constexpr QRgb COL_METBG   = 0xCC181825;  // metrics panel bg
+    static constexpr QRgb COL_HARM    = 0xFFFFB86C;
+    static constexpr QRgb COL_METBG   = 0xCC181825;
+    static constexpr QRgb COL_PERSIST = 0x2289B4FA;  // semi-transparent blue
+    static constexpr QRgb COL_PN      = 0xFFFF9580;  // phase noise trace
 };

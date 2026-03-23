@@ -80,7 +80,7 @@ static QStringList channelNames(const QString &prefix)
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle("RFSoC Evaluation Tool");
+    setWindowTitle("Avnet RFSoC Evaluation Tool");
     resize(1600, 950);
     setStyleSheet("QMainWindow,QWidget{background:#1e1e2e;color:#cdd6f4;}"
                   "QStatusBar{background:#181825;}");
@@ -96,22 +96,7 @@ MainWindow::MainWindow(QWidget *parent)
         p.sampleNum  = Constant::ADC_SAMPLE_NUM;
     }
 
-    m_cmdW  = new CmdWorker (Constant::BOARD_IP, Constant::CMD_PORT,  this);
-    m_dataW = new DataWorker(Constant::BOARD_IP, Constant::DATA_PORT, this);
-
-    connect(m_dataW, &DataWorker::captureReady,
-            this,    &MainWindow::onCaptureReady);
-    connect(m_dataW, &DataWorker::sendDone,
-            this,    &MainWindow::onGenerateDone);
-    connect(m_cmdW,  &CmdWorker::sequenceDone,
-            this,    &MainWindow::onCmdSequenceDone);
-    connect(m_cmdW,  &CmdWorker::errorOccurred,
-            this, [this](const QString &e){ setStatus("CMD: " + e); });
-    connect(m_dataW, &DataWorker::errorOccurred,
-            this, [this](const QString &e){ setStatus("DATA: " + e); unlockUi(); });
-
-    m_cmdW->start();
-    m_dataW->start();
+    connectWorkers(QString(Constant::BOARD_IP));
 
     auto *central = new QWidget(this);
     setCentralWidget(central);
@@ -120,10 +105,41 @@ MainWindow::MainWindow(QWidget *parent)
     root->setSpacing(6);
     root->addWidget(buildMenuPanel());
 
-    m_dacPlot = new PlotWidget("DAC", central);
-    root->addWidget(m_dacPlot, 1);
-    m_adcPlot = new PlotWidget("ADC", central);
-    root->addWidget(m_adcPlot, 1);
+    // DAC column: PlotWidget on top, WaterfallWidget below
+    auto *dacCol = new QWidget(central);
+    auto *dacColLay = new QVBoxLayout(dacCol);
+    dacColLay->setContentsMargins(0,0,0,0);
+    dacColLay->setSpacing(4);
+    m_dacPlot = new PlotWidget("DAC", dacCol);
+    m_dacWaterfall = new WaterfallWidget("DAC", dacCol);
+    m_dacWaterfall->setVisible(false);
+    dacColLay->addWidget(m_dacPlot, 3);
+    dacColLay->addWidget(m_dacWaterfall, 1);
+    root->addWidget(dacCol, 1);
+
+    // ADC column
+    auto *adcCol = new QWidget(central);
+    auto *adcColLay = new QVBoxLayout(adcCol);
+    adcColLay->setContentsMargins(0,0,0,0);
+    adcColLay->setSpacing(4);
+    m_adcPlot = new PlotWidget("ADC", adcCol);
+    m_adcWaterfall = new WaterfallWidget("ADC", adcCol);
+    m_adcWaterfall->setVisible(false);
+    adcColLay->addWidget(m_adcPlot, 3);
+    adcColLay->addWidget(m_adcWaterfall, 1);
+    root->addWidget(adcCol, 1);
+
+    // Waterfall maximize: when maximized hide plot, expand waterfall
+    connect(m_dacWaterfall, &WaterfallWidget::maximizeToggled, this, [this, dacColLay](bool max){
+        m_dacPlot->setVisible(!max);
+        dacColLay->setStretch(0, max ? 0 : 3);
+        dacColLay->setStretch(1, max ? 1 : 1);
+    });
+    connect(m_adcWaterfall, &WaterfallWidget::maximizeToggled, this, [this, adcColLay](bool max){
+        m_adcPlot->setVisible(!max);
+        adcColLay->setStretch(0, max ? 0 : 3);
+        adcColLay->setStretch(1, max ? 1 : 1);
+    });
 
     m_statusLbl = new QLabel("Ready");
     m_statusLbl->setStyleSheet("color:#a6e3a1; font-size:11px;");
@@ -152,6 +168,60 @@ MainWindow::~MainWindow()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// connectWorkers — create/recreate workers and wire all signals
+// ─────────────────────────────────────────────────────────────────────────────
+
+void MainWindow::connectWorkers(const QString &ip)
+{
+    // Stop and destroy existing workers cleanly
+    if (m_cmdW) {
+        m_cmdW->stop();
+        m_cmdW->wait(3000);
+        delete m_cmdW;
+        m_cmdW = nullptr;
+    }
+    if (m_dataW) {
+        m_dataW->stop();
+        m_dataW->wait(3000);
+        delete m_dataW;
+        m_dataW = nullptr;
+    }
+
+    // Reset pending flags so stale sequenceDone/sendDone can't fire
+    m_pendingAcquire  = false;
+    m_pendingGenerate = false;
+
+    m_cmdW  = new CmdWorker (ip, Constant::CMD_PORT,  this);
+    m_dataW = new DataWorker(ip, Constant::DATA_PORT, this);
+
+    // Data signals
+    connect(m_dataW, &DataWorker::captureReady,
+            this,    &MainWindow::onCaptureReady);
+    connect(m_dataW, &DataWorker::sendDone,
+            this,    &MainWindow::onGenerateDone);
+    connect(m_dataW, &DataWorker::errorOccurred,
+            this, [this](const QString &e){
+                setStatus("DATA ERROR: " + e);
+                unlockUi();
+            });
+
+    // CMD signals
+    connect(m_cmdW, &CmdWorker::sequenceDone,
+            this,   &MainWindow::onCmdSequenceDone);
+    connect(m_cmdW, &CmdWorker::connected,
+            this, [this, ip](){
+                setStatus("Connected to " + ip);
+            });
+    connect(m_cmdW, &CmdWorker::errorOccurred,
+            this, [this](const QString &e){
+                setStatus("CMD ERROR: " + e);
+            });
+
+    m_cmdW->start();
+    m_dataW->start();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Menu panel
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -168,6 +238,33 @@ QWidget *MainWindow::buildMenuPanel()
     title->setStyleSheet("color:#89b4fa;font-size:16px;font-weight:bold;");
     title->setAlignment(Qt::AlignHCenter);
     lay->addWidget(title);
+    lay->addWidget(makeSep());
+
+    // ── Connection ────────────────────────────────────────────────────────
+    {
+        auto *hdr = new QLabel("── Connection ──");
+        hdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
+        hdr->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(hdr);
+
+        lay->addWidget(makeLabel("Board IP"));
+        m_ipEdit = makeField(Constant::BOARD_IP);
+        lay->addWidget(m_ipEdit);
+
+        auto *btnConnect = new QPushButton("Reconnect"); styleGreen(btnConnect);
+        connect(btnConnect, &QPushButton::clicked, this, [this](){
+            QString ip = m_ipEdit->text().trimmed();
+            if (ip.isEmpty()) {
+                setStatus("Error: IP address is empty");
+                return;
+            }
+            setStatus("Reconnecting to " + ip + " …");
+            lockUi();
+            connectWorkers(ip);
+            unlockUi();
+        });
+        lay->addWidget(btnConnect);
+    }
     lay->addWidget(makeSep());
 
     // DAC
@@ -197,6 +294,21 @@ QWidget *MainWindow::buildMenuPanel()
         m_dacRateEdit = makeField(
             QString::number(m_dacP[0].sampleRate / 1e9, 'f', 4), true);
         lay->addWidget(m_dacRateEdit);
+
+        lay->addWidget(makeLabel("Waveform Shape"));
+        m_comboWaveShape = new QComboBox;
+        m_comboWaveShape->addItems({"Sine", "Square"});
+        m_comboWaveShape->setStyleSheet(COMBO_STYLE);
+        connect(m_comboWaveShape, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this](int idx){
+                    m_dacDutyEdit->setEnabled(idx == 1);  // enable only for square
+                });
+        lay->addWidget(m_comboWaveShape);
+
+        lay->addWidget(makeLabel("Duty Cycle (square only)"));
+        m_dacDutyEdit = makeField("0.5");
+        m_dacDutyEdit->setEnabled(false);
+        lay->addWidget(m_dacDutyEdit);
 
         auto *row = new QHBoxLayout;
         m_btnGen  = new QPushButton("Generate"); styleGreen(m_btnGen);
@@ -248,6 +360,53 @@ QWidget *MainWindow::buildMenuPanel()
         connect(m_chkAuto, &QCheckBox::toggled,
                 this, [this](bool v){ m_autoAcquire = v; });
         lay->addWidget(m_chkAuto);
+
+        // Waterfall toggle
+        lay->addWidget(makeSep());
+        auto *wfHdr = new QLabel("── Waterfall ──");
+        wfHdr->setStyleSheet("color:#cba6f7;font-weight:bold;");
+        wfHdr->setAlignment(Qt::AlignHCenter);
+        lay->addWidget(wfHdr);
+
+        auto *chkWaterfall = new QCheckBox("Enable Waterfall");
+        chkWaterfall->setStyleSheet("QCheckBox{color:#cdd6f4;}");
+        connect(chkWaterfall, &QCheckBox::toggled, this, [this](bool v){
+            m_waterfallEnabled = v;
+            m_dacWaterfall->setVisible(v);
+            m_adcWaterfall->setVisible(v);
+            if (!v) {
+                m_dacWaterfall->clearHistory();
+                m_adcWaterfall->clearHistory();
+            }
+        });
+        lay->addWidget(chkWaterfall);
+
+        lay->addWidget(makeLabel("dBFS min"));
+        auto *wfMinEdit = makeField("-120");
+        lay->addWidget(wfMinEdit);
+        lay->addWidget(makeLabel("dBFS max"));
+        auto *wfMaxEdit = makeField("0");
+        lay->addWidget(wfMaxEdit);
+
+        auto *btnWfRange = new QPushButton("Set Range"); styleGreen(btnWfRange);
+        connect(btnWfRange, &QPushButton::clicked, this, [this, wfMinEdit, wfMaxEdit](){
+            bool ok1, ok2;
+            double mn = wfMinEdit->text().toDouble(&ok1);
+            double mx = wfMaxEdit->text().toDouble(&ok2);
+            if (ok1 && ok2 && mn < mx) {
+                m_dacWaterfall->setDbRange(mn, mx);
+                m_adcWaterfall->setDbRange(mn, mx);
+            }
+        });
+        lay->addWidget(btnWfRange);
+
+        auto *btnWfClear = new QPushButton("Clear History"); styleGreen(btnWfClear);
+        connect(btnWfClear, &QPushButton::clicked, this, [this](){
+            m_dacWaterfall->clearHistory();
+            m_adcWaterfall->clearHistory();
+        });
+        lay->addWidget(btnWfClear);
+
     }
 
     lay->addWidget(makeSep());
@@ -285,8 +444,17 @@ void MainWindow::onGenerate()
     p.freq = freq;
 
     int trimmed = 0;
-    m_dacData = WaveformGenerator::generateToneNormalized(
-        p.freq, p.theta, p.sampleRate, p.sampleNum, trimmed);
+    bool isSquare = (m_comboWaveShape->currentIndex() == 1);
+    if (isSquare) {
+        bool dcOk = false;
+        double duty = m_dacDutyEdit->text().toDouble(&dcOk);
+        if (!dcOk || duty <= 0.0 || duty >= 1.0) duty = 0.5;
+        m_dacData = WaveformGenerator::generateSquareNormalized(
+            p.freq, p.theta, p.sampleRate, p.sampleNum, trimmed, duty);
+    } else {
+        m_dacData = WaveformGenerator::generateToneNormalized(
+            p.freq, p.theta, p.sampleRate, p.sampleNum, trimmed);
+    }
     p.sampleNumTrimmed = trimmed;
     m_dacPlot->updateWaveform(m_dacData, p.sampleRate);
 
@@ -371,12 +539,12 @@ void MainWindow::enqueueAcquireSequence()
 
     // CMD sequence with 100 ms delay between each command
     QList<CmdItem> seq;
-    seq << CmdItem{ "TermMode 0\r\n",                                              100, false }
+    seq << CmdItem{ "TermMode 0\r\n",                                              150, false }
         << CmdItem{ QString("SetLocalMemSample 0 %1 %2 %3\r\n")
-                        .arg(ch/4).arg(ch%4).arg(p.sampleNum).toUtf8(),            100, false }
-        << CmdItem{ "LocalMemInfo 0\r\n",                                          100, false }
+                        .arg(ch/4).arg(ch%4).arg(p.sampleNum).toUtf8(),            150, false }
+        << CmdItem{ "LocalMemInfo 0\r\n",                                          150, false }
         << CmdItem{ QString("LocalMemTrigger 0 0 %1 0x%2\r\n")
-                        .arg(p.sampleNum).arg(1 << ch, 0, 16).toUtf8(),            100, true  };
+                        .arg(p.sampleNum).arg(1 << ch, 0, 16).toUtf8(),            150, true  };
     m_cmdW->enqueueSequence(seq);
     setStatus(QString("Acquiring ADC ch%1 …").arg(ch));
 }
@@ -396,11 +564,13 @@ void MainWindow::onCmdSequenceDone()
 
 void MainWindow::onGenerateDone()
 {
-    // Waveform bytes landed in board memory — now fire the playback trigger
     const int ch = m_dacCh;
     setStatus(QString("Waveform uploaded — triggering DAC ch%1").arg(ch));
     m_cmdW->enqueueCommand(
         QString("LocalMemTrigger 1 0 0 0x%1\r\n").arg(1 << ch, 0, 16).toUtf8());
+    if (m_waterfallEnabled)
+        m_dacWaterfall->addRow(m_dacPlot->lastFreqSpectrum(),
+                               0.0, m_dacP[m_dacCh].sampleRate / 2e6);
     unlockUi();
 }
 
@@ -409,6 +579,9 @@ void MainWindow::onCaptureReady(WaveformData data)
     m_adcData = data.samples;
     m_adcP[data.channel].sampleRate = data.sampleRate;
     m_adcPlot->updateWaveform(m_adcData, data.sampleRate);
+    if (m_waterfallEnabled)
+        m_adcWaterfall->addRow(m_adcPlot->lastFreqSpectrum(),
+                               0.0, data.sampleRate / 2e6);
     setStatus(QString("Capture done — %1 samples, ch%2")
                   .arg(data.samples.size()).arg(data.channel));
 

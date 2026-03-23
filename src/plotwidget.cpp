@@ -192,8 +192,8 @@ QVector<double> PlotWidget::hammingFFT_dBFS(
 // RF Metrics computation
 // ─────────────────────────────────────────────────────────────────────────────
 void PlotWidget::computeMetrics(const QVector<double> &db,
-                                const QVector<double> &freqsMHz,
-                                double sampleRateHz)
+                                 const QVector<double> &freqsMHz,
+                                 double sampleRateHz)
 {
     m_metrics = RfMetrics();
     int N = db.size();
@@ -404,7 +404,7 @@ void PlotWidget::drawPlot(QPainter &p, const QRect &wr, PlotData &d) const
 
     // title
     bool zoomed=(d.viewXMin>d.dataXMin+1e-9||d.viewXMax<d.dataXMax-1e-9||
-                   d.viewYMin>d.dataYMin+1e-9||d.viewYMax<d.dataYMax-1e-9);
+                 d.viewYMin>d.dataYMin+1e-9||d.viewYMax<d.dataYMax-1e-9);
     QString titleStr=d.title+(zoomed?"  [dbl-click: reset]":"");
     p.setPen(QColor(COL_TITLE));
     QFont tf=p.font();tf.setPixelSize(12);tf.setBold(true);p.setFont(tf);

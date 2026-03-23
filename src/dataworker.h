@@ -30,10 +30,11 @@ public:
     static constexpr int WRITE_TIMEOUT_MS   = 2000;
     static constexpr int READ_CHUNK_MS      = 5000;
     static constexpr int CAPTURE_TOTAL_MS   = 30000;
+    static constexpr int CAPTURE_SETTLE_MS  = 200;   // settle after trigger
 
 signals:
     void captureReady(WaveformData data);
-    void sendDone();                        // emitted after SendWaveform completes
+    void sendDone();
     void errorOccurred(const QString &msg);
 
 protected:

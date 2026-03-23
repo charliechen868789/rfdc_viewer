@@ -24,6 +24,8 @@ public:
     explicit PlotWidget(const QString &label, QWidget *parent = nullptr);
 
     void updateWaveform(const QVector<qint16> &samples, double sampleRateHz);
+    // Returns the most recent FFT dBFS spectrum for waterfall feeding
+    QVector<double> lastFreqSpectrum() const { return m_freq.ys; }
 
 protected:
     void paintEvent(QPaintEvent *) override;

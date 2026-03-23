@@ -13,7 +13,8 @@ SOURCES += \
     src/plotwidget.cpp \
     src/cmdworker.cpp \
     src/dataworker.cpp \
-    src/waveformgenerator.cpp
+    src/waveformgenerator.cpp \
+    src/waterfallwidget.cpp
 
 HEADERS += \
     src/mainwindow.h \
@@ -21,5 +22,6 @@ HEADERS += \
     src/cmdworker.h \
     src/dataworker.h \
     src/waveformgenerator.h \
+    src/waterfallwidget.h \
     src/commontypes.h \
     src/constants.h

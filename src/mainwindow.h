@@ -14,6 +14,8 @@
 #include "cmdworker.h"
 #include "dataworker.h"
 #include "waveformgenerator.h"
+#include <QComboBox>
+#include "waterfallwidget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -34,12 +36,13 @@ private slots:
     void onDacChannelChanged(int idx);
     void onAdcChannelChanged(int idx);
     void onCaptureReady(WaveformData data);
-    void onCmdSequenceDone();   // fires DATA request after CMD sequence finishes
-    void onGenerateDone();      // fires final LocalMemTrigger after waveform upload
+    void onCmdSequenceDone();
+    void onGenerateDone();
     void onExit();
 
 private:
     QWidget *buildMenuPanel();
+    void     connectWorkers(const QString &ip);  // (re)create + wire workers
     void     sendCmd(const QString &cmd);
     void     enqueueAcquireSequence();
     void     lockUi();
@@ -49,7 +52,8 @@ private:
     // ── state ─────────────────────────────────────────────────────────────
     int  m_dacCh = 0;
     int  m_adcCh = 0;
-    bool m_autoAcquire    = false;
+    bool m_autoAcquire     = false;
+    bool m_waterfallEnabled = false;
     bool m_pendingAcquire  = false;
     bool m_pendingGenerate = false;
 
@@ -65,8 +69,10 @@ private:
     DataWorker *m_dataW = nullptr;
 
     // ── plot widgets ──────────────────────────────────────────────────────
-    PlotWidget *m_dacPlot = nullptr;
-    PlotWidget *m_adcPlot = nullptr;
+    PlotWidget      *m_dacPlot      = nullptr;
+    PlotWidget      *m_adcPlot      = nullptr;
+    WaterfallWidget *m_dacWaterfall = nullptr;
+    WaterfallWidget *m_adcWaterfall = nullptr;
 
     // ── controls ──────────────────────────────────────────────────────────
     QPushButton *m_btnGen    = nullptr;
@@ -75,14 +81,17 @@ private:
     QPushButton *m_btnSave   = nullptr;
     QCheckBox   *m_chkAuto   = nullptr;
 
-    QComboBox *m_comboDac    = nullptr;
-    QLineEdit *m_dacFreqEdit = nullptr;
-    QLineEdit *m_dacNumEdit  = nullptr;
-    QLineEdit *m_dacRateEdit = nullptr;
+    QComboBox *m_comboDac       = nullptr;
+    QLineEdit *m_dacFreqEdit    = nullptr;
+    QLineEdit *m_dacNumEdit     = nullptr;
+    QLineEdit *m_dacRateEdit    = nullptr;
+    QComboBox *m_comboWaveShape = nullptr;  // Sine / Square
+    QLineEdit *m_dacDutyEdit    = nullptr;  // duty cycle 0..1 (square only)
 
     QComboBox *m_comboAdc    = nullptr;
     QLineEdit *m_adcNumEdit  = nullptr;
     QLineEdit *m_adcRateEdit = nullptr;
 
     QLabel    *m_statusLbl   = nullptr;
+    QLineEdit *m_ipEdit      = nullptr;
 };
